@@ -1,9 +1,12 @@
 -module(couchlib_tests).
 
+-define(DELETE_TESTS, false).
+
 -include_lib("eunit/include/eunit.hrl").
 
--export([test/0,
-         map_date_title/1,
+-compile(export_all).
+
+-export([map_date_title/1,
          map_date_title/2]).
 
 -import(proplists, [get_value/2]).
@@ -13,46 +16,52 @@
 % - Return values for missing docs
 % - Conflcts
 % - first, next, last, prev
+%% USAGE
+%% eunit:test(couchlib_tests).
 
-test() ->
+couchlib_test_() ->
+	io:format(user, "******* running from couchlib_test_()~n", []),
     Tests = [
-             fun basic_db_test/0,
-             fun basic_doc_test/0,
-             fun batch_insert_test/0,
-             fun select_docs_test/0,
-             fun basic_view_test/0,
-             fun view_support_test/0,
-             fun term_store_test/0,
-             fun composite_id_pattern_test/0,
-             fun composite_key_test/0,
-             fun fruit_price_test/0,
-             fun web_source_test/0,
-             fun basic_map_reduce_testcase/0
-    ],
-    eunit:test({setup, fun setup/0, Tests}).
+			 fun basic_db_testcase/0
+			 , fun basic_doc_testcase/0
+			 , fun batch_insert_testcase/0
+			 , fun select_docs_testcase/0
+			 , fun basic_view_testcase/0
+			 , fun view_support_testcase/0
+			 , fun term_store_testcase/0
+			 , fun composite_id_pattern_testcase/0
+			 , fun composite_key_testcase/0
+			 , fun fruit_price_testcase/0
+			 , fun web_source_testcase/0
+			 , fun basic_avp_map_testcase/0
+			 , fun basic_map_reduce_testcase/0
+			],
+	{setup, fun setup/0, Tests}.
 
 setup() ->
-    couchlib:start().
+    %% couchlib:start().
+	ok.
 
-basic_db_test() ->
+basic_db_testcase() ->
+	io:format(user, "******* basic_db_testcase~n", []),
 
     % Create a new db with a unique name.
-    Name = random_dbname(),
-    {ok, Db} = couchlib:open(Name),
+    DbName = random_dbname("basic_db_testcase"),
+    {ok, Db} = couchlib:open(DbName),
 
     % Use info/1 to get info about the db.
     Info = couchlib:info(Db),
-    ?assertEqual(Name, get_value(db_name, Info)),
+    ?assertEqual(DbName, get_value(db_name, Info)),
 
     % We can close the db using close/1 (TODO - what does this do?).
     ?assertEqual(ok, couchlib:close(Db)),
 
     % Delete using the db name.
-    couchlib:delete_db(Name).
+    cleanup_test_case(DbName).
 
-basic_doc_test() ->
-
-    DbName = random_dbname(),
+basic_doc_testcase() ->
+	io:format(user, "******* basic_doc_testcase~n", []),
+    DbName = random_dbname("basic_doc_testcase"),
     {ok, Db} = couchlib:open(DbName),
 
     % Docs are created using couchlib_doc:new.
@@ -114,11 +123,11 @@ basic_doc_test() ->
     ?assertError(undef, couchdb:get(Db, "badid")),
     ?assertError(undef, couchdb:delete(Db, "badid")),
 
-    couchlib:delete_db(DbName).
+    cleanup_test_case(DbName).
 
-batch_insert_test() ->
-
-    DbName = random_dbname(),
+batch_insert_testcase() ->
+	io:format(user, "******* batch_insert_testcase~n", []),
+    DbName = random_dbname("batch_insert_testcase"),
     {ok, Db} = couchlib:open(DbName),
 
     % Use put_many to insert a batch of documents. This can have a 10x increase
@@ -129,11 +138,12 @@ batch_insert_test() ->
     ?assertEqual(10, length(DocsR)),
     ?assertMatch([{ok, _}|_], DocsR),
 
-    couchlib:delete_db(DbName).
+    cleanup_test_case(DbName).
 
-select_docs_test() ->
+select_docs_testcase() ->
+	io:format(user, "******* select_docs_testcase~n", []),
 
-    DbName = random_dbname(),
+    DbName = random_dbname("select_docs_testcase"),
     {ok, Db} = couchlib:open(DbName),
 
     % Select something that isn't there.
@@ -236,14 +246,14 @@ select_docs_test() ->
 
     % TODO - test stale
 
-    couchlib:delete_db(DbName).
+    cleanup_test_case(DbName).
 
-basic_view_test() ->
-
+basic_view_testcase() ->
+	io:format(user, "******* basic_view_testcase~n", []),
     % These tests require view support.
     couchlib_views:start(),
 
-    DbName = random_dbname(),
+    DbName = random_dbname("basic_view_testcase"),
     {ok, Db} = couchlib:open(DbName),
 
     % Views are lazily created indexes on databases. Let's create some
@@ -292,8 +302,8 @@ basic_view_test() ->
 
     MapStr =
         <<"fun(Doc) -> "
-          "  [{proplists:get_value(\"date\", Doc),"
-          "    proplists:get_value(\"title\", Doc)}]"
+          "  [{list_to_binary(proplists:get_value(\"date\", Doc)),"
+          "    list_to_binary(proplists:get_value(\"title\", Doc))}]"
           "end.">>,
 
     % We add a view as a property of a special "design" document. CouchDB uses
@@ -317,17 +327,17 @@ basic_view_test() ->
 
     R1 = couchlib:select({Db, "str", "by_date"}, []),
 
-    % Here's what we expect from this map:
+    % Here's what we expect from this map:		
 
     Expected = {3,0, [[{id, <<"hello-world">>},
-                       {key, "2009/01/15 15:52:20"},
-                       {value, "Hello World"}],
+                       {key, <<"2009/01/15 15:52:20">>},
+                       {value, <<"Hello World">>}],
                       [{id, <<"biking">>},
-                       {key, "2009/01/30 18:04:11"},
-                       {value, "Biking"}],
+                       {key, <<"2009/01/30 18:04:11">>},
+                       {value, <<"Biking">>}],
                       [{id, <<"bought-a-cat">>},
-                       {key, "2009/02/17 21:13:39"},
-                       {value, "Bought a Cat"}]]},
+                       {key, <<"2009/02/17 21:13:39">>},
+                       {value, <<"Bought a Cat">>}]]},
     ?assertEqual(Expected, R1),
 
     % Note that the document IDs are returned as binary strings even though
@@ -341,7 +351,7 @@ basic_view_test() ->
     % Let's using the same function, but encoded as an Erlang term.
 
     MapFun = fun(Doc) ->
-                     [{get_value("date", Doc), get_value("title", Doc)}]
+                     [{list_to_binary(get_value("date", Doc)), list_to_binary(get_value("title", Doc))}]
              end,
     MapFunBin = term_to_binary(MapFun),
     DDoc2 = couchlib_doc:new(<<"_design/fun">>,
@@ -371,7 +381,6 @@ basic_view_test() ->
 
     % Our exported function map_date_title/2 provides the same mapping as the
     % previous two functions.
-
     R3 = couchlib:select({Db, "mf", "by_date"}, []),
     ?assertEqual(Expected, R3),
 
@@ -391,12 +400,13 @@ basic_view_test() ->
     R4 = couchlib:select({Db, "mfa", "by_date"}, []),
     ?assertEqual(Expected, R4),
 
-    couchlib:delete_db(DbName).
+    cleanup_test_case(DbName).
 
-view_support_test() ->
+view_support_testcase() ->
+	io:format(user, "******* view_support_testcase~n", []),
 
     couchlib_views:start(),
-    DbName = random_dbname(),
+    DbName = random_dbname("view_support_testcase"),
     {ok, Db} = couchlib:open(DbName),
 
     % While you can create views as fields in design documents, it is easier to
@@ -405,8 +415,8 @@ view_support_test() ->
     % E.g. you can define the Map function from basic_view_test/0 (see above)
     % this way.
     Map = fun(Doc) ->
-                  [{get_value("date", Doc),
-                    get_value("title", Doc)}]
+                  [{list_to_binary(get_value("date", Doc)),
+                    list_to_binary(get_value("title", Doc))}]
           end,
     DDoc1 = couchlib_design:new("fun", [{view, {"by_date", Map}}]),
     couchlib:put(Db, DDoc1),
@@ -427,11 +437,11 @@ view_support_test() ->
     % should get this for our view results.
 
     Expected = {2, 0, [[{id, <<"hello">>},
-                        {key, "2009/01/15"},
-                        {value, "Hello World"}],
+                        {key, <<"2009/01/15">>},
+                        {value, <<"Hello World">>}],
                        [{id, <<"biking">>},
-                        {key, "2009/01/30"},
-                        {value, "Biking"}]]},
+                        {key, <<"2009/01/30">>},
+                        {value, <<"Biking">>}]]},
 
     R1 = couchlib:select({Db, "fun", "by_date"}, []),
     ?assertEqual(Expected, R1),
@@ -450,11 +460,12 @@ view_support_test() ->
 
     % TODO - multiple views, API for adding, removing, and replacing views
 
-    couchlib:delete_db(DbName).
+    cleanup_test_case(DbName).
 
-term_store_test() ->
+term_store_testcase() ->
+	io:format(user, "******* term_store_testcase~n", []),
     couchlib_views:start(),
-    DbName = random_dbname(),
+    DbName = random_dbname("term_store_testcase"),
     {ok, Db} = couchlib:open(DbName),
 
     % One of the advantages of using CouchDB as an emebedded Erlang database is
@@ -481,8 +492,8 @@ term_store_test() ->
     % and another by role. The fun is passed a Doc reference, which is a list
     % of [{<<"_id">>, Id}, {<<"_rev">>, Rev}, Term].
 
-    ByName = fun([_, _, {user, Name, _}]) -> [Name] end,
-    ByRole = fun([_, _, {user, _, Role}]) -> [atom_to_list(Role)] end,
+    ByName = fun([_, _, {user, Name, _}]) -> [list_to_binary(Name)] end,
+    ByRole = fun([_, _, {user, _, Role}]) -> [list_to_binary(atom_to_list(Role))] end,
 
     DDoc = couchlib_design:new("funs", [{view, {"by_name", ByName}},
                                         {view, {"by_role", ByRole}}]),
@@ -491,19 +502,20 @@ term_store_test() ->
     % We can use these to lookup a sorted list of users by either name or role.
 
     ByNameR = couchlib:select({Db, "funs", "by_name"}, []),
-    ?assertEqual({2, 0, [[{id, <<"adam">>}, {key, "adam"}, {value, null}],
-                         [{id, <<"jane">>}, {key, "jane"}, {value, null}]]},
+    ?assertEqual({2, 0, [[{id, <<"adam">>}, {key, <<"adam">>}, {value, null}],
+                         [{id, <<"jane">>}, {key, <<"jane">>}, {value, null}]]},
                  ByNameR),
 
     ByRoleR = couchlib:select({Db, "funs", "by_role"}, []),
-    ?assertEqual({2, 0, [[{id, <<"jane">>}, {key, "admin"}, {value, null}],
-                         [{id, <<"adam">>}, {key, "user"}, {value, null}]]},
+    ?assertEqual({2, 0, [[{id, <<"jane">>}, {key, <<"admin">>}, {value, null}],
+                         [{id, <<"adam">>}, {key, <<"user">>}, {value, null}]]},
                  ByRoleR),
 
-    couchlib:delete_db(DbName).
+    cleanup_test_case(DbName).
 
-composite_id_pattern_test() ->
-    DbName = random_dbname(),
+composite_id_pattern_testcase() ->
+	io:format(user, "******* composite_id_pattern_testcase~n", []),
+    DbName = random_dbname("composite_id_pattern_testcase"),
     {ok, Db} = couchlib:open(DbName),
 
     % CouchDB indexes database docs using a b+tree index on the doc IDs. To
@@ -544,11 +556,12 @@ composite_id_pattern_test() ->
     % in defining keys from document attributes, use a view (see
     % composite_key_test below).
 
-    couchlib:delete_db(DbName).
+    cleanup_test_case(DbName).
 
-composite_key_test() ->
+composite_key_testcase() ->
+	io:format(user, "******* composite_key_testcase~n", []),
     couchlib_views:start(),
-    DbName = random_dbname(),
+    DbName = random_dbname("composite_key_testcase"),
     {ok, Db} = couchlib:open(DbName),
 
     % A view can be indexed using any of these types: atom, number, binary, or
@@ -666,13 +679,14 @@ composite_key_test() ->
     ?assertEqual([<<"341">>, <<"022">>, <<"154">>],
                  [get_value(id, R) || R <- PostDocs]),
 
-    couchlib:delete_db(DbName).
+    cleanup_test_case(DbName).
 
-fruit_price_test() ->
+fruit_price_testcase() ->
+	io:format(user, "******* fruit_price_testcase~n", []),
     % This is taken from "CouchDB: The Definitive Guide"
 
     couchlib_views:start(),
-    DbName = random_dbname(),
+    DbName = random_dbname("fruit_price_testcase"),
     {ok, Db} = couchlib:open(DbName),
 
     D1 = couchlib_doc:new([{"item", "apple"},
@@ -720,12 +734,13 @@ fruit_price_test() ->
                    {value,"Price Max"}]],
                  [proplists:delete(id, Row) || Row <- Rows]),
 
-    couchlib:delete_db(DbName).
+    cleanup_test_case(DbName).
 
-web_source_test() ->
+web_source_testcase() ->
+	io:format(user, "******* web_source_testcase~n", []),
 
     couchlib_views:start(),
-    DbName = random_dbname(),
+    DbName = random_dbname("web_source_testcase"),
     {ok, Db} = couchlib:open(DbName),
 
     % This test illustrates how a database can be used to store "raw" web
@@ -796,12 +811,13 @@ web_source_test() ->
                          [{id, <<"doc3">>}, {key, "bar 3"}, {value, null}]]},
                  couchlib:select({Db, "indexes", "title"}, [])),
 
-    couchlib:delete_db(DbName).
+    cleanup_test_case(DbName).
 
-basic_map_reduce_test() ->
-
+basic_map_reduce_testcase() ->
+	io:format(user, "******* basic_map_reduce_testcase~n", []),
+ 
     couchlib_views:start(),
-    DbName = random_dbname(),
+    DbName = random_dbname("basic_map_reduce_testcase"),
     {ok, Db} = couchlib:open(DbName),
 
     couchlib:put_many(Db, [couchlib_doc:new([{key, ["a","b","c"]}]),
@@ -811,7 +827,7 @@ basic_map_reduce_test() ->
                            couchlib_doc:new([{key, ["b","a","g"]}])]),
     
     M = fun(Doc) -> [{get_value(key, Doc), 1}] end,
-    R = fun(_Keys, Vals, _) -> lists:sum(lists:flatten(Vals)) end,
+    R = fun(_Keys, Vals, Reduce) -> io:fwrite(user, "Reduce fun ~p~p~n", [Vals, Reduce]), lists:sum(lists:flatten(Vals)) end,
     couchlib:put(Db, couchlib_design:new("test", [{view, {"test", M, R}}])),
 
     {ok, Rows} = couchlib:select({Db, "test", "test", 3}, []),
@@ -820,10 +836,63 @@ basic_map_reduce_test() ->
     {ok, Rows1} = couchlib:select({Db, "test", "test", 2}, []),
     io:format(user, "############ ~p~n", [Rows1]),
 
-    couchlib:delete_db(DbName).
+    cleanup_test_case(DbName).
+
+basic_avp_map_testcase() ->
+	io:format(user, "******* basic_avp_map_testcase~n", []),
+
+	couchlib_views:start(),
+    DbName = random_dbname("basic_avp_map_testcase"),
+    %% DbName = "smsc-cardinal",
+    {ok, Db} = couchlib:open(DbName),
+
+	couchlib:delete(Db, <<"_design/indexes">>),
+	
+	MapStr1 =
+		<<"fun([{_,Id},_,_]) -> 
+    		[Time, SubRest] = binary:split(Id,<<\".\">>), 
+    		[Sub, _Rest] = binary:split(SubRest,<<\".\">>), 
+    		[{Sub, Time}] 
+  		end.">>,
+
+	MapStr2 =
+		<<"fun([{_,Id},_,Body]) -> 
+    		case is_list(Body) of 
+      			true -> 
+        			case proplists:get_value(<<\"response\">>, Body) of 
+          				{Cmd,CmdHdr,Avps} ->
+            				[Time,_] = binary:split(Id,<<\".\">>), 
+            				case couchlib_term:avp_optional_binary(Avps, ['Result-Code']) of
+              					[] -> [];
+              					[Rc] -> [{Rc,Time}] 
+            				end;
+          				_ -> [] 
+        			end; 
+      			_ -> [] 
+    		end 
+  		end.">>,
+
+	DDoc2 = couchlib_doc:new(<<"_design/indexes">>,
+						 [
+						  {<<"language">>, <<"couchlib">>},
+						  {<<"views">>, 
+						   [
+							{<<"by_sub">>,[{<<"map">>, MapStr1}]}
+							, {<<"by_rc">>,[{<<"map">>, MapStr2}]}
+						   ]
+						  }
+						 ]
+						),
+
+	couchlib:put(Db, DDoc2),
+
+	%% ToDo: add data and check index views
+	
+    cleanup_test_case(DbName).
+
 
 map_date_title(Doc) ->
-    [{get_value("date", Doc), get_value("title", Doc)}].
+    [{list_to_binary(get_value("date", Doc)), list_to_binary(get_value("title", Doc))}].
 
 map_date_title(Doc, myarg) ->
     map_date_title(Doc).
@@ -831,3 +900,22 @@ map_date_title(Doc, myarg) ->
 random_dbname() ->
     random:seed(erlang:now()),
     lists:concat(["testdb_", random:uniform(1000000)]).
+
+random_dbname(Postfix) ->
+    random:seed(erlang:now()),
+    lists:concat(["testdb_", random:uniform(1000000), "_" , Postfix]).
+
+cleanup_test_case(DbName) ->
+	case ?DELETE_TESTS of
+		true -> couchlib:delete_db(DbName);
+		_ 	-> ok
+	end.
+
+%% print_list([]) ->
+%% 	ok;
+%% print_list([H|T]) ->
+%% 	?debugFmt("######## ~p", [H]),
+%% 	print_list(T).
+%% 
+%% ?debugMsg("######## Going to evaluate R3"),
+

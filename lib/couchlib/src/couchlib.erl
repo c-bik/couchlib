@@ -7,6 +7,7 @@
 -export([open/1, open/2,
          close/1,
          delete_db/1, delete_db/2,
+		 delete_dbs/1,
          info/1, info/2,
          all_dbs/0,
          put/2, put/3,
@@ -71,6 +72,17 @@ delete_db(Name) ->
 
 delete_db(Name, Options) ->
     couch_server:delete(db_name(Name), Options).
+
+
+delete_dbs([[$_|_]|T]) ->
+	delete_dbs(T);
+delete_dbs([<<$_:8, _Rest/binary>>|T]) ->
+	delete_dbs(T);
+delete_dbs([H|T]) ->
+    delete_db(H, []),
+	delete_dbs(T);
+delete_dbs([]) ->
+	ok.
 
 %% ---------------------------------------------------------------------------
 %% @doc Returns info about the specified database.
@@ -286,7 +298,6 @@ select({#db{}=Db0, Design, View}, StartKey, EndKey, Options)
     catch
         _:{not_found, missing} -> {error, design_not_found}
     end;
-
 select({#db{}=Db0, Design, ReduceView, GroupLevel}, StartKey, EndKey, Options) 
   when is_list(Design), is_list(ReduceView) ->
     Db = reopen(Db0),
@@ -298,7 +309,7 @@ select({#db{}=Db0, Design, ReduceView, GroupLevel}, StartKey, EndKey, Options)
     try couch_view:get_reduce_view(Db, design_id(Design), 
                                 list_to_binary(ReduceView), Stale) of
         {ok, Reduce, Group} ->
-            {ok, GroupRowsFun, RespFun} = fold_reduce_view_acc_fun(Db, Group, GroupLevel),
+            {ok, GroupRowsFun, RespFun} = fold_reduce_view_acc_fun(Db, couch_httpd_view:view_etag(Db, Group, Reduce), GroupLevel),
             case couch_view:fold_reduce(Reduce, RespFun,
                     {Limit, Skip, undefined, []}, 
                     [{key_group_fun, GroupRowsFun}|fold_view_options(Args)]) of
@@ -451,7 +462,7 @@ enum_db_acc_fun(Db, DocCount, #view_query_args{}=Args) ->
     Helpers = #view_fold_helper_funs{
       reduce_count=fun couch_db:enum_docs_reduce_to_count/1,
       start_response=fun doc_fold_start_response/6,
-      send_row=fun doc_fold_send_row/5},
+      send_row=fun doc_fold_send_row/6},
     FoldFun = couch_httpd_view:make_view_fold_fun(
                 nil, Args, <<"">>, Db, UpdateSeq, DocCount, Helpers),
     fun(#full_doc_info{id=Id}=FDI, Offset, Acc) ->
@@ -485,12 +496,11 @@ doc_fold_start_response(_Req, _Etag, _RowCount, Offset, _Acc, _UpdateSeq) ->
 %%
 %% Removes the outer tuple for "objects" to present them as tuple lists.
 %% ---------------------------------------------------------------------------
-
 doc_fold_reduce_send_row(_Resp, {Key, Value}, Acc) ->
     {ok, [{Key, Value}|Acc]}.
 
-doc_fold_send_row(_Resp, Db, Doc, IncludeDocs, {Offset, Acc}) ->
-    {Row} = couch_httpd_view:view_row_obj(Db, Doc, IncludeDocs),
+doc_fold_send_row(_Resp, Db, Doc, IncludeDocs, Conflicts, {Offset, Acc}) ->
+    {Row} = couch_httpd_view:view_row_obj(Db, Doc, IncludeDocs, Conflicts),
     {ok, {Offset, [lists:map(fun format_row_item/1, Row)|Acc]}}.
 
 %% ---------------------------------------------------------------------------
@@ -520,9 +530,8 @@ enum_db_options(#view_query_args{start_docid=StartId,
 %% It borrows from hovercraft.
 %% ---------------------------------------------------------------------------
 
-fold_reduce_view_acc_fun(Db, Group, GroupLevel) ->
+fold_reduce_view_acc_fun(Db, CurrentEtag, GroupLevel) ->
     UpdateSeq = couch_db:get_update_seq(Db),
-    CurrentEtag = couch_httpd_view:view_group_etag(Group, Db),
     Helpers = #reduce_fold_helper_funs{
       %%reduce_count=fun couch_view:reduce_to_count/1,
       start_response=fun doc_fold_reduce_start_response/4,
@@ -535,7 +544,7 @@ fold_view_acc_fun(Db, RowCount, Args) ->
     Helpers = #view_fold_helper_funs{
       reduce_count=fun couch_view:reduce_to_count/1,
       start_response=fun doc_fold_start_response/6,
-      send_row=fun doc_fold_send_row/5},
+      send_row=fun doc_fold_send_row/6},
     couch_httpd_view:make_view_fold_fun(
       nil, Args, <<"">>, Db, UpdateSeq, RowCount, Helpers).
 

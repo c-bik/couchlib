@@ -74,6 +74,8 @@ get_attrs(#doc{body={Attrs}}) ->
 %% @doc Adds or updates a single attribute for Doc.
 %%---------------------------------------------------------------------------
 
+set_attr(Name, Value, #doc{body=Body}=Doc) when is_binary(Body) ->
+	set_attr(Name, Value, Doc#doc{body=binary_to_term(Body)});
 set_attr(Name, Value, #doc{body={Attrs}}=Doc) ->
     Doc#doc{body={[{wrap_couch_obj(Name), wrap_couch_obj(Value)}
                    |proplists:delete(Name, Attrs)]}}.
