@@ -285,6 +285,31 @@ select({#db{}=Db0, Design, View}, StartKey, EndKey, Options)
         {not_found, missing_named_view} -> {error, view_not_found}
     catch
         _:{not_found, missing} -> {error, design_not_found}
+    end;
+
+select({#db{}=Db0, Design, ReduceView, GroupLevel}, StartKey, EndKey, Options) 
+  when is_list(Design), is_list(ReduceView) ->
+    Db = reopen(Db0),
+    BaseArgs = view_query_base_args(Options),
+    #view_query_args{stale=Stale,
+                     limit=Limit,
+                     skip=Skip} = BaseArgs,
+    Args = BaseArgs#view_query_args{start_key=StartKey, end_key=EndKey},
+    try couch_view:get_reduce_view(Db, design_id(Design), 
+                                list_to_binary(ReduceView), Stale) of
+        {ok, Reduce, Group} ->
+            {ok, GroupRowsFun, RespFun} = fold_reduce_view_acc_fun(Db, Group, GroupLevel),
+            case couch_view:fold_reduce(Reduce, RespFun,
+                    {Limit, Skip, undefined, []}, 
+                    [{key_group_fun, GroupRowsFun}|fold_view_options(Args)]) of
+                {ok, {_,_,_,Rows}} ->
+                    {ok, Rows};
+                Error ->
+                    {error, Error}
+            end;
+        {not_found, missing_named_view} -> {error, view_not_found}
+    catch
+        _:{not_found, missing} -> {error, design_not_found}
     end.
 
 %% ---------------------------------------------------------------------------
@@ -446,6 +471,9 @@ enum_db_acc_fun(Db, DocCount, #view_query_args{}=Args) ->
 %% Preserves the initial offset and provides an empty list for acc.
 %% ---------------------------------------------------------------------------
 
+doc_fold_reduce_start_response(_Req, _Etag, _Acc, _UpdateSeq) ->
+    {ok, nil, []}.
+
 doc_fold_start_response(_Req, _Etag, _RowCount, Offset, _Acc, _UpdateSeq) ->
     {ok, nil, {Offset, []}}.
 
@@ -457,6 +485,9 @@ doc_fold_start_response(_Req, _Etag, _RowCount, Offset, _Acc, _UpdateSeq) ->
 %%
 %% Removes the outer tuple for "objects" to present them as tuple lists.
 %% ---------------------------------------------------------------------------
+
+doc_fold_reduce_send_row(_Resp, {Key, Value}, Acc) ->
+    {ok, [{Key, Value}|Acc]}.
 
 doc_fold_send_row(_Resp, Db, Doc, IncludeDocs, {Offset, Acc}) ->
     {Row} = couch_httpd_view:view_row_obj(Db, Doc, IncludeDocs),
@@ -488,6 +519,16 @@ enum_db_options(#view_query_args{start_docid=StartId,
 %%
 %% It borrows from hovercraft.
 %% ---------------------------------------------------------------------------
+
+fold_reduce_view_acc_fun(Db, Group, GroupLevel) ->
+    UpdateSeq = couch_db:get_update_seq(Db),
+    CurrentEtag = couch_httpd_view:view_group_etag(Group, Db),
+    Helpers = #reduce_fold_helper_funs{
+      %%reduce_count=fun couch_view:reduce_to_count/1,
+      start_response=fun doc_fold_reduce_start_response/4,
+      send_row=fun doc_fold_reduce_send_row/3},
+    couch_httpd_view:make_reduce_fold_funs(
+        nil, GroupLevel, undefined, CurrentEtag, UpdateSeq, Helpers).
 
 fold_view_acc_fun(Db, RowCount, Args) ->
     UpdateSeq = couch_db:get_update_seq(Db),
