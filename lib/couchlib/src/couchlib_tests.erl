@@ -26,8 +26,8 @@ test() ->
              fun composite_id_pattern_test/0,
              fun composite_key_test/0,
              fun fruit_price_test/0,
-             fun web_source_test/0
-             % TODO: fun basic_map_reduce_test/0
+             fun web_source_test/0,
+             fun basic_map_reduce_testcase/0
     ],
     eunit:test({setup, fun setup/0, Tests}).
 
@@ -800,8 +800,6 @@ web_source_test() ->
 
 basic_map_reduce_test() ->
 
-    %% TODO: Finish this
-
     couchlib_views:start(),
     DbName = random_dbname(),
     {ok, Db} = couchlib:open(DbName),
@@ -813,11 +811,14 @@ basic_map_reduce_test() ->
                            couchlib_doc:new([{key, ["b","a","g"]}])]),
     
     M = fun(Doc) -> [{get_value(key, Doc), 1}] end,
-    R = fun(_Keys, Vals, _) -> lists:sum(Vals) end,
+    R = fun(_Keys, Vals, _) -> lists:sum(lists:flatten(Vals)) end,
     couchlib:put(Db, couchlib_design:new("test", [{view, {"test", M, R}}])),
 
-    {_, _, Rows} = couchlib:select({Db, "test", "test"}, []),
+    {ok, Rows} = couchlib:select({Db, "test", "test", 3}, []),
     io:format(user, "############ ~p~n", [Rows]),
+
+    {ok, Rows1} = couchlib:select({Db, "test", "test", 2}, []),
+    io:format(user, "############ ~p~n", [Rows1]),
 
     couchlib:delete_db(DbName).
 
