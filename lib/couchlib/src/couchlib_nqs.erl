@@ -15,6 +15,7 @@
 -define(ADD_FUN,   <<"add_fun">>).
 -define(MAP_DOC,   <<"map_doc">>).
 -define(REDUCE,    <<"reduce">>).
+-define(REREDUCE,   <<"rereduce">>).
 
 -define(ERROR(Msg), [<<"error">>, <<"native_query_server">>, 
                      list_to_binary(Msg)]).
@@ -40,10 +41,11 @@ handle_call({prompt, [?ADD_FUN, Bin]}, _From, #state{funs=Funs}=State) ->
 handle_call({prompt, [?MAP_DOC, {Doc}]}, _From, #state{funs=Funs}=State) ->
     {reply, apply_maps(Funs, Doc, []), State};
 
-handle_call({prompt, [?REDUCE, Fun, B]}, _From, State) ->
-    %% TODO: implement yo!
-    io:format(user, "&&&&&&&&&&& ~p~n", [{Fun, B, State}]),
-    {reply, [true, [0]], State};
+handle_call({prompt, [?REDUCE, Funs, B]}, _From, State) ->
+    {reply, apply_reduces(Funs, B), State};
+
+handle_call({prompt, [?REREDUCE, Funs, B]}, _From, State) ->
+    {reply, apply_rereduces(Funs, B), State};
 
 handle_call({prompt, Data}, _From, State) ->
     error_logger:error_report({unhandled_prompt, Data}),
@@ -102,7 +104,47 @@ term_to_fun({M, F}=T) when is_atom(M) andalso is_atom(F) -> T;
 term_to_fun({M, F, A}=T) when is_atom(M) andalso 
                               is_atom(F) andalso 
                               is_list(A) -> T;
-term_to_fun(Term) -> throw({invalid_fun_spec, Term}). 
+term_to_fun(Term) -> throw({invalid_fun_spec, Term}).
+
+%% ---------------------------------------------------------------------------
+%% @doc Applies a list of rereduce funs to values.
+%% No Idea what happens next :P
+%% ---------------------------------------------------------------------------
+
+apply_rereduces(Funs, B) ->
+    apply_rereduces(Funs, B, []).
+apply_rereduces([], _B, Acc) -> [true, Acc];
+apply_rereduces([FDef|T], B, Acc) ->
+    apply_rereduces(T, B, [apply_rereduce(FDef, B)|Acc]).
+
+apply_rereduce(FDef, B) ->
+    apply_rereduce(FDef, B, []).
+apply_rereduce(FDef, B, Acc) when is_binary(FDef) ->
+    apply_rereduce(to_fun(FDef), B, Acc);
+apply_rereduce(FDef, [Val|T], Values) when is_function(FDef)->
+    apply_rereduce(FDef, T, [Val|Values]);
+apply_rereduce(FDef, [], Values) ->
+    FDef([],Values,true).
+
+%% ---------------------------------------------------------------------------
+%% @doc Applies a list of reduce funs to Key values.
+%% No Idea what happens next :P
+%% ---------------------------------------------------------------------------
+
+apply_reduces(Funs, B) ->
+    apply_reduces(Funs, B, []).
+apply_reduces([], _B, Acc) -> [true, Acc];
+apply_reduces([FDef|T], B, Acc) ->
+    apply_reduces(T, B, [apply_reduce(FDef, B)|Acc]).
+
+apply_reduce(FDef, B) ->
+    apply_reduce(FDef, B, {[],[]}).
+apply_reduce(FDef, B, Acc) when is_binary(FDef) ->
+    apply_reduce(to_fun(FDef), B, Acc);
+apply_reduce(FDef, [[Key|Val]|T], {Keys, Values}) when is_function(FDef)->
+    apply_reduce(FDef, T, {[Key|Keys], [Val|Values]});
+apply_reduce(FDef, [], {Keys, Values}) ->
+    FDef(Keys,Values,false).
 
 %% ---------------------------------------------------------------------------
 %% @doc Applies a list of maps to a doc. This reverses the list of mapped
